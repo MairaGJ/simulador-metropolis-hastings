@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Simulador de Metropolis-Hastings</title>
+<style>
+  :root{
+    --ink:#1b2333; --muted:#566074; --line:#d3d9e3; --bg:#f3f5f8; --card:#ffffff;
+    --cur:#1f5fa8; --cand:#d9701a; --ok:#2a8a3e; --bad:#c0392b; --uis:#e86a10;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    font-family:"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif;
+    background:var(--bg); color:var(--ink); line-height:1.3;
+    font-size:clamp(14px, 2.05vh, 22px);
+  }
+  i{font-style:italic}
+  sub{font-size:.7em; line-height:0}
+  .app{display:grid; grid-template-rows:auto minmax(0,1fr) auto auto; gap:8px; height:100vh; min-height:600px; padding:8px 12px 10px;}
+  /* ---------- encabezado ---------- */
+  .top{display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; border-bottom:3px solid var(--ink); padding-bottom:5px;}
+  h1{font-size:1.4rem; margin:0}
+  .rule{margin:1px 0 0; color:var(--muted); font-size:.95rem}
+  .rule b{color:var(--ink)}
+  .legend{display:flex; gap:14px; flex-wrap:wrap; font-size:.9rem; color:var(--muted)}
+  .legend > span{display:inline-block; white-space:nowrap}
+  .dot{width:.8em;height:.8em;border-radius:50%;display:inline-block;margin-right:.4em;vertical-align:-1px}
+  /* ---------- zona principal ---------- */
+  .main{display:grid; grid-template-columns:minmax(0,1fr) clamp(330px,30vw,450px); gap:8px; min-height:0}
+  .plots{display:grid; grid-template-rows:minmax(0,2.5fr) auto minmax(0,1fr); gap:8px; min-height:0}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:6px 12px; min-height:0; display:flex; flex-direction:column}
+  .cardhead{display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin-bottom:2px}
+  .cardhead h2{font-size:1.02rem; margin:0}
+  .hint{font-size:.8rem; color:var(--muted)}
+  .plotwrap{position:relative; flex:1 1 auto; min-height:0}
+  .plotwrap svg{position:absolute; inset:0; width:100%; height:100%; display:block}
+  .explain{display:grid; grid-template-columns:auto minmax(0,1fr); gap:4px 16px; align-items:center; padding:7px 14px; border-left:6px solid var(--uis)}
+  .explain h2{font-size:.95rem; margin:0; color:var(--uis); max-width:7.5em; line-height:1.15}
+  .explain p{margin:0; font-size:1.08rem; line-height:1.3}
+  .explain .sub{font-size:.92rem; color:var(--muted); margin-top:2px}
+  /* ---------- panel de paso ---------- */
+  .side{min-height:0; display:flex; flex-direction:column}
+  .side .card{flex:1 1 auto; overflow:auto}
+  .stepper{display:flex; flex-wrap:wrap; gap:4px; margin:3px 0 6px}
+  .chip{font-size:.72rem; padding:1px 7px; border-radius:20px; background:#eef1f6; color:#7a8499}
+  .chip.done{background:#e3edf9; color:#38557d}
+  .chip.active{background:var(--ink); color:#fff; font-weight:600}
+  .row{display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:baseline; gap:8px; padding:2px 0; border-bottom:1px dashed #e4e8ef}
+  .row .lab{color:var(--muted); font-size:.9rem}
+  .row .val{font-variant-numeric:tabular-nums; font-weight:600; font-size:1.05rem; text-align:right}
+  .row .val.off{color:#b3bac8; font-weight:400}
+  .row small{display:block; font-weight:400; color:var(--muted); font-size:.72rem; line-height:1.1}
+  .c-cur{color:var(--cur)} .c-cand{color:var(--cand)} .c-ok{color:var(--ok)} .c-bad{color:var(--bad)}
+  .formula{font-size:.8rem; color:var(--muted); text-align:right; font-variant-numeric:tabular-nums; min-height:1.15em; margin-top:2px}
+  .ubar{position:relative; height:4.6em; margin:6px 8px 0}
+  .ubar .track{position:absolute; left:0; right:0; top:1.5em; height:1.15em; border-radius:6px; background:#e9edf3; border:1px solid var(--line)}
+  .ubar .afill{position:absolute; left:0; top:1.5em; height:1.15em; border-radius:6px 0 0 6px; background:#bfe3c6; border:1px solid #8cc79a; width:0}
+  .ubar .alab{position:absolute; top:3.05em; transform:translateX(-50%); font-size:.78rem; color:var(--ok); font-weight:700; white-space:nowrap}
+  .ubar .umark{position:absolute; top:1.05em; height:1.7em; width:0; border-left:3px solid var(--ink)}
+  .ubar .ulab{position:absolute; top:0; transform:translateX(-50%); font-weight:700; font-size:.9rem; white-space:nowrap}
+  .ubar .ticks{position:absolute; left:5px; right:5px; top:1.55em; display:flex; justify-content:space-between; font-size:.75rem; line-height:1.1em; color:var(--muted); pointer-events:none}
+  .ubar.hidden{opacity:.25}
+  /* ---------- controles ---------- */
+  .controls{display:grid; grid-template-columns:1.25fr 1.25fr 1fr; gap:0; padding:6px 4px}
+  .cg{padding:0 12px; display:grid; gap:5px; align-content:start}
+  .cg + .cg{border-left:1px solid var(--line)}
+  .cg-t{font-size:.8rem; font-weight:700; color:var(--muted); display:flex; justify-content:space-between; gap:8px}
+  .cg-t span{font-weight:400}
+  .crow{display:flex; flex-wrap:wrap; gap:7px; align-items:center}
+  button{font:inherit; font-size:.92rem; border:1px solid var(--line); background:#fff; color:var(--ink); border-radius:9px; padding:5px 11px; cursor:pointer}
+  button:hover:not(:disabled){background:#eef2f8}
+  .tsel{display:flex; align-items:center; gap:6px; font-size:.9rem}
+  button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #7fb2ee; outline-offset:1px}
+  button:disabled{opacity:.45; cursor:not-allowed}
+  button.primary{background:var(--ink); color:#fff; border-color:var(--ink); font-weight:700; padding:5px 16px; text-align:left; line-height:1.15}
+  button.primary:hover:not(:disabled){background:#2c3a57}
+  button.primary small{display:block; font-weight:400; opacity:.85; font-size:.72rem}
+  .grp{display:inline-flex; align-items:center; gap:6px; font-size:.88rem; color:var(--muted)}
+  .grp b{color:var(--ink); font-variant-numeric:tabular-nums; min-width:2.4em; text-align:right}
+  input[type=range]{width:7.5em; accent-color:var(--cand)}
+  input[type=number],select{font:inherit; font-size:.9rem; padding:3px 5px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--ink)}
+  input[type=number]{width:4.6em}
+  /* ---------- cadena ---------- */
+  .chainbar{display:flex; flex-direction:row; align-items:center; gap:6px 22px; flex-wrap:wrap; padding:5px 14px}
+  .counters{display:flex; gap:6px 18px; flex-wrap:wrap; font-size:.95rem}
+  .counters b{font-variant-numeric:tabular-nums}
+  .counters .note{color:var(--muted); font-size:.78rem}
+  .chain{flex:1 1 340px; min-width:0; font-size:.95rem; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-variant-numeric:tabular-nums}
+  .chain .rej{color:var(--bad)}
+  .chain .cur{font-weight:700; color:var(--cur)}
+  @media (max-width:1050px){ .main{grid-template-columns:1fr} .app{height:auto} .plots{grid-template-rows:360px auto 170px} .controls{grid-template-columns:1fr; gap:8px} .cg + .cg{border-left:none; border-top:1px solid var(--line); padding-top:6px} }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header class="top">
+    <div>
+      <h1>Simulador de Metropolis-Hastings</h1>
+      <p class="rule">Propuesta simétrica: <b>y = <i>x</i><sub>t</sub> + ε</b>, ε ~ N(0, σ²) &nbsp;·&nbsp; <b>α = min{1, π(y) / π(<i>x</i><sub>t</sub>)}</b> &nbsp;·&nbsp; <b>u ~ U(0,1)</b></p>
+    </div>
+    <label class="grp tsel"><span>Distribución objetivo</span><select id="selTarget"><option value="mix">Dos picos (ilustrativa)</option><option value="centro">Tiempo medio de validación del Centro</option></select></label>
+    <div class="legend" aria-hidden="true">
+      <span><i class="dot" style="background:var(--cur)"></i>Estado actual <i>x</i><sub>t</sub></span>
+      <span><i class="dot" style="background:var(--cand)"></i>Candidato propuesto <i>y</i></span>
+      <span><i class="dot" style="background:var(--ok)"></i>Aceptado</span>
+      <span><i class="dot" style="background:var(--bad)"></i>Rechazado</span>
+    </div>
+  </header>
+
+  <main class="main">
+    <section class="plots">
+      <div class="card">
+        <div class="cardhead"><h2>Distribución objetivo π(<i>x</i>)</h2><span class="hint" id="hintTarget">conocida solo hasta una constante de proporcionalidad</span></div>
+        <div class="plotwrap"><svg id="curveSvg" role="img" aria-label="Distribución objetivo con estado actual y candidato"></svg></div>
+      </div>
+      <div class="card explain" aria-live="polite">
+        <h2>¿Qué está ocurriendo?</h2>
+        <div><p id="explainText"></p><p class="sub" id="explainSub"></p></div>
+      </div>
+      <div class="card">
+        <div class="cardhead"><h2>Muestras generadas</h2><span class="hint" id="histCount">n = 1</span><span class="hint">el histograma no es una prueba de convergencia</span></div>
+        <div class="plotwrap"><svg id="histSvg" role="img" aria-label="Histograma de las muestras generadas"></svg></div>
+      </div>
+    </section>
+
+    <aside class="side">
+      <div class="card">
+        <div class="cardhead"><h2>Paso actual</h2><span class="hint" id="iterLabel"></span></div>
+        <div class="stepper" id="stepper"></div>
+        <div class="fields" id="fields"></div>
+        <div class="ubar hidden" id="ubar">
+          <div class="track"></div><div class="afill" id="afill"></div>
+          <div class="umark" id="umark" style="display:none"></div>
+          <div class="ulab" id="ulab" style="display:none"></div>
+          <div class="alab" id="alab" style="display:none"></div>
+          <div class="ticks"><span>0</span><span>1</span></div>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <section class="card controls" aria-label="Controles">
+    <div class="cg">
+      <div class="cg-t">Paso a paso <span>→ / Espacio / AvPág</span></div>
+      <div class="crow">
+        <button class="primary" id="btnNext"></button>
+        <button id="btnComplete" title="Ejecuta las etapas restantes de la iteración actual">Completar iteración</button>
+      </div>
+      <div class="crow">
+        <button id="btnReset">↺ Reiniciar</button>
+        <button id="btnNew">Nueva simulación</button>
+      </div>
+    </div>
+    <div class="cg">
+      <div class="cg-t">Ejecución automática</div>
+      <div class="crow">
+        <button id="btnRun">▶ Ejecutar</button>
+        <label class="grp"><span>pasos</span><select id="selSteps"><option>10</option><option selected>50</option><option>100</option><option>500</option></select></label>
+        <label class="grp"><span>velocidad</span><select id="selSpeed"><option value="slow">Lenta</option><option value="normal" selected>Normal</option><option value="fast">Rápida</option><option value="instant">Instantánea</option></select></label>
+      </div>
+      <div class="crow">
+        <button id="btnPause" disabled>⏸ Pausa</button>
+        <label class="grp"><span>Estado inicial <i>x</i><sub>0</sub></span><input type="number" id="inX0" min="-7.5" max="8.5" step="0.5" value="-3"></label>
+        <label class="grp"><span>Semilla</span><input type="number" id="inSeed" step="1" value="317"></label>
+      </div>
+    </div>
+    <div class="cg">
+      <div class="cg-t">Tamaño del paso σ</div>
+      <div class="crow">
+        <label class="grp"><span>pequeño</span><input type="range" id="rngSigma" min="0.05" max="4" step="0.05" value="1.0" aria-label="Tamaño del paso"><span>amplio</span><b id="sigmaVal">1.00</b></label>
+      </div>
+      <div class="crow">
+        <button id="pSmall">Pequeño 0.2</button><button id="pMid">Intermedio 1.0</button><button id="pBig">Amplio 3.0</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="card chainbar">
+    <div class="counters">
+      <span>Iteración: <b id="cT">t = 0</b></span>
+      <span>Aceptaciones: <b id="cAcc">0</b></span>
+      <span>Rechazos: <b id="cRej">0</b></span>
+      <span>Tasa de aceptación: <b id="cRate">—</b> <span class="note">(informativa)</span></span>
+    </div>
+    <div class="chain" id="chainText"></div>
+  </section>
+</div>
+
+<noscript>Este simulador requiere JavaScript.</noscript>
+
+<script>
+(function(){
+'use strict';
+
+/*CORE_START*/
+// =====================================================================
+//  NÚCLEO MATEMÁTICO (sin DOM) — Metropolis-Hastings con propuesta simétrica
+// =====================================================================
+const TARGETS = {
+  mix:    { xMin:-8, xMax:9, w1:0.6, mu1:-1.5, s1:0.8, w2:0.4, mu2:2.5, s2:1.0,
+            sMin:0.05, sMax:5, sStep:0.05, sDef:1.0, sSmall:0.2, sMid:1.0, sBig:3.0, sDec:2, lab:1,
+            x0Min:-7.5, x0Max:8.5, x0Step:0.5, x0Def:-3, dec:2, tickStep:2, tickDec:0, xlab:'x', hint:'conocida solo hasta una constante de proporcionalidad' },
+  centro: { xMin:1.6, xMax:3.2, w1:1, mu1:2.4, s1:0.16, w2:0, mu2:0, s2:1,
+            sMin:0.005, sMax:0.8, sStep:0.005, sDef:0.16, sSmall:0.02, sMid:0.16, sBig:0.6, sDec:3, lab:2,
+            x0Min:1.65, x0Max:3.15, x0Step:0.05, x0Def:1.9, dec:3, tickStep:0.2, tickDec:1, xlab:'tiempo medio (h-eq)', hint:'ilustración: 20 observaciones, cv 30 %, aproximación normal; conocida hasta una constante' }
+};
+const CFG = Object.assign({}, TARGETS.mix);
+function setTarget(k){ Object.assign(CFG, TARGETS[k] || TARGETS.mix); }
+
+// log π̃(x): mezcla de dos núcleos gaussianos SIN normalizar (logsumexp, estable numéricamente)
+function logTarget(x){
+  const a = Math.log(CFG.w1) - ((x-CFG.mu1)*(x-CFG.mu1))/(2*CFG.s1*CFG.s1);
+  const b = Math.log(CFG.w2) - ((x-CFG.mu2)*(x-CFG.mu2))/(2*CFG.s2*CFG.s2);
+  const m = Math.max(a,b);
+  return m + Math.log(Math.exp(a-m) + Math.exp(b-m));
+}
+function target(x){ return Math.exp(logTarget(x)); }
+
+// Generador pseudoaleatorio con semilla (mulberry32)
+function makeRng(seed){
+  let a = (Math.floor(seed) >>> 0) || 1;
+  return function(){
+    a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function randOpen(rng){ let u = rng(); while(u <= 0) u = rng(); return u; }      // u ∈ (0,1)
+function randNormal(rng){ const u1 = randOpen(rng), u2 = rng(); return Math.sqrt(-2*Math.log(u1))*Math.cos(2*Math.PI*u2); }
+
+function clampSigma(s){ return (isFinite(s) && s > 0) ? Math.min(CFG.sMax, Math.max(CFG.sMin, s)) : CFG.sDef; }
+
+function newSim(seed, x0, sigma){
+  return { seed:seed, rng:makeRng(seed), sigma:clampSigma(sigma), t:0, x:x0,
+           chain:[{x:x0, accepted:null}], acc:0, rej:0, stage:'READY', it:null };
+}
+const STAGES = ['READY','PROPOSED','COMPARED','ALPHA','U','DECIDED','UPDATED'];
+function stageIdx(s){ return STAGES.indexOf(s); }
+
+// Etapa 1 — Proponer:  y = x_t + ε,  ε ~ N(0, σ²)
+function stPropose(S){
+  const eps = S.sigma * randNormal(S.rng);
+  S.it = { x:S.x, tBefore:S.t, sigma:S.sigma, eps:eps, y:S.x + eps, delta:eps };
+  S.stage = 'PROPOSED';
+}
+// Etapa 2 — Comparar densidades (en escala log para evitar underflow)
+function stCompare(S){
+  const it = S.it;
+  it.lpx = logTarget(it.x); it.lpy = logTarget(it.y);
+  it.px = Math.exp(it.lpx); it.py = Math.exp(it.lpy);
+  it.lower = it.lpy < it.lpx;
+  S.stage = 'COMPARED';
+}
+// Etapa 3 — α = min{1, π(y)/π(x_t)}  (log α = min{0, log π(y) − log π(x_t)})
+function stAlpha(S){
+  const it = S.it;
+  it.logAlpha = Math.min(0, it.lpy - it.lpx);
+  it.alpha = Math.exp(it.logAlpha);
+  S.stage = 'ALPHA';
+}
+// Etapa 4 — u ~ U(0,1)  (se genera DESPUÉS de α)
+function stDrawU(S){
+  const it = S.it;
+  it.u = randOpen(S.rng); it.logu = Math.log(it.u);
+  S.stage = 'U';
+}
+// Etapa 5 — decisión:  aceptar si u ≤ α  (equivale a log u ≤ log α)
+function stDecide(S){
+  const it = S.it;
+  it.accepted = (it.logu <= it.logAlpha);
+  S.stage = 'DECIDED';
+}
+// Etapa 6 — actualizar:  x_{t+1} = y si se acepta;  x_{t+1} = x_t si se rechaza
+function stUpdate(S){
+  const it = S.it;
+  if(it.accepted){ S.x = it.y; S.acc++; } else { S.rej++; }
+  S.t++;
+  S.chain.push({x:S.x, accepted:it.accepted});
+  it.xNew = S.x;
+  S.stage = 'UPDATED';
+}
+// Avanza exactamente una etapa lógica
+function advance(S){
+  switch(S.stage){
+    case 'READY': case 'UPDATED': stPropose(S); break;
+    case 'PROPOSED': stCompare(S); break;
+    case 'COMPARED': stAlpha(S); break;
+    case 'ALPHA': stDrawU(S); break;
+    case 'U': stDecide(S); break;
+    case 'DECIDED': stUpdate(S); break;
+  }
+  return S.stage;
+}
+const Core = { CFG, TARGETS, setTarget, logTarget, target, makeRng, randOpen, randNormal, newSim, advance,
+               stPropose, stCompare, stAlpha, stDrawU, stDecide, stUpdate, stageIdx, clampSigma };
+/*CORE_END*/
+
+// =====================================================================
+//  INTERFAZ
+// =====================================================================
+const $ = id => document.getElementById(id);
+const NS = 'http://www.w3.org/2000/svg';
+function el(name, attrs, parent){
+  const e = document.createElementNS(NS, name);
+  for(const k in attrs) e.setAttribute(k, attrs[k]);
+  if(parent) parent.appendChild(e);
+  return e;
+}
+const MINUS = '\u2212';
+function fmtX(x){ const v = Math.abs(x) < Math.pow(10,-CFG.dec)/2 ? 0 : x; return (v < 0 ? MINUS : '') + Math.abs(v).toFixed(CFG.dec); }
+function fmtSigned(d){ return (d >= 0 ? '+' : MINUS) + Math.abs(d).toFixed(CFG.dec); }
+function ticks(){ const o = [], st = CFG.tickStep; for(let x = Math.ceil(CFG.xMin/st - 1e-9)*st; x <= CFG.xMax + 1e-9; x += st) o.push(+x.toFixed(6)); return o; }
+function fmtTick(x){ return (x < 0 ? MINUS : '') + Math.abs(x).toFixed(CFG.tickDec); }
+const SUP = {'-':'⁻','0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹'};
+function expFmt(v){
+  const s = v.toExponential(1); const parts = s.split('e');
+  return parts[0] + '×10' + String(parseInt(parts[1],10)).split('').map(c => SUP[c] || c).join('');
+}
+function fmtDen(p){ return p >= 0.001 ? p.toFixed(3) : (p > 0 ? expFmt(p) : '0'); }
+function fmtAlpha(a){ return a === 1 ? '1' : (a >= 0.0005 ? a.toFixed(3) : expFmt(a)); }
+function fmtUA(u, a){          // evita que u y α parezcan iguales por redondeo
+  if(a < 0.0005) return [u.toFixed(3), fmtAlpha(a)];
+  let d = 3; while(d < 9 && u.toFixed(d) === a.toFixed(d) && u !== a) d++;
+  return [u.toFixed(d), a.toFixed(d)];
+}
+const SUBN = '₀₁₂₃₄₅₆₇₈₉';
+function subNum(n){ return String(n).split('').map(c => SUBN[+c]).join(''); }
+
+// ---- estado de la aplicación ----
+let S = null;
+let view = { curX:null, candOpacity:1, pulse:0, anim:false };
+let busy = false, running = false, runId = 0, animId = 0;
+let normZ = 1;                      // ∫π̃ — solo para dibujar la curva de referencia en el histograma (el algoritmo NUNCA la usa)
+
+// ---- geometría (se recalcula según el tamaño real de cada gráfico) ----
+let K = 1;                          // factor de escala tipográfica
+const G = { W:900, H:300, L:60, R:20, T:36, B:50, pw:0, ph:0 };
+const Hh = { W:900, H:120, L:60, R:20, T:8, B:30, pw:0, ph:0 };
+let yMax = 0.75;
+const sx = x => G.L + (x - CFG.xMin)/(CFG.xMax - CFG.xMin) * G.pw;
+const sy = p => G.T + G.ph - p / yMax * G.ph;
+const axisY = () => G.T + G.ph;
+const s_ = n => n * K;
+
+const curveSvg = $('curveSvg'), histSvg = $('histSvg');
+let gStatic, gDyn;
+
+function fit(){
+  const cw = curveSvg.clientWidth, ch = curveSvg.clientHeight, hw = histSvg.clientWidth, hh = histSvg.clientHeight;
+  if(cw < 120 || ch < 80 || hw < 120 || hh < 50) return false;
+  K = Math.max(0.95, Math.min(1.6, Math.min(cw/900, ch/290)));
+  G.W = cw; G.H = ch; G.L = Math.round(56*K); G.R = Math.round(18*K); G.T = Math.round(34*K); G.B = Math.round(46*K);
+  G.pw = G.W - G.L - G.R; G.ph = G.H - G.T - G.B;
+  curveSvg.setAttribute('viewBox', `0 0 ${cw} ${ch}`);
+  Hh.W = hw; Hh.H = hh; Hh.L = G.L; Hh.R = G.R; Hh.T = Math.round(6*K); Hh.B = Math.round(28*K);
+  Hh.pw = Hh.W - Hh.L - Hh.R; Hh.ph = Hh.H - Hh.T - Hh.B;
+  histSvg.setAttribute('viewBox', `0 0 ${hw} ${hh}`);
+  buildCurveStatic();
+  return true;
+}
+
+function buildCurveStatic(){
+  curveSvg.innerHTML = '';
+  const defs = el('defs', {}, curveSvg);
+  const m = el('marker', {id:'arrCand', viewBox:'0 0 10 10', refX:'8', refY:'5', markerWidth:'7', markerHeight:'7', orient:'auto'}, defs);
+  el('path', {d:'M0,0 L10,5 L0,10 z', fill:'#d9701a'}, m);
+  gStatic = el('g', {}, curveSvg);
+  gDyn = el('g', {}, curveSvg);
+  let pk = 0; for(let i=0;i<=800;i++){ pk = Math.max(pk, target(CFG.xMin + i/800*(CFG.xMax-CFG.xMin))); }
+  yMax = pk * 1.3;
+  const N = 500; let d = '';
+  for(let i=0;i<=N;i++){ const x = CFG.xMin + i/N*(CFG.xMax-CFG.xMin); d += (i?'L':'M') + sx(x).toFixed(1) + ' ' + sy(target(x)).toFixed(1); }
+  el('path', {d: d + 'L' + sx(CFG.xMax) + ' ' + axisY() + 'L' + sx(CFG.xMin) + ' ' + axisY() + 'Z', fill:'#dbe7f5', stroke:'none'}, gStatic);
+  el('path', {d:d, fill:'none', stroke:'#2b3a55', 'stroke-width':s_(3), 'stroke-linejoin':'round'}, gStatic);
+  el('line', {x1:G.L, y1:axisY(), x2:G.W-G.R, y2:axisY(), stroke:'#2b3a55', 'stroke-width':s_(1.8)}, gStatic);
+  el('line', {x1:G.L, y1:G.T-6, x2:G.L, y2:axisY(), stroke:'#2b3a55', 'stroke-width':s_(1.8)}, gStatic);
+  ticks().forEach(x => {
+    el('line', {x1:sx(x), y1:axisY(), x2:sx(x), y2:axisY()+s_(6), stroke:'#2b3a55', 'stroke-width':s_(1.8)}, gStatic);
+    const t = el('text', {x:sx(x), y:axisY()+s_(24), 'text-anchor':'middle', 'font-size':s_(15), fill:'#566074'}, gStatic); t.textContent = fmtTick(x);
+  });
+  const ax = el('text', {x:G.W-G.R, y:axisY()+s_(40), 'text-anchor':'end', 'font-size':s_(17), 'font-style':'italic', fill:'#1b2333'}, gStatic); ax.textContent = CFG.xlab;
+  const ay = el('text', {x:G.L+s_(8), y:G.T-s_(12), 'text-anchor':'start', 'font-size':s_(17), 'font-style':'italic', fill:'#1b2333'}, gStatic); ay.textContent = 'π(x)';
+}
+
+// texto SVG con subíndices (parts = ['π(x', {sub:'t'}, ') = 0.103'])
+function halo(t){ t.setAttribute('paint-order','stroke'); t.setAttribute('stroke','#ffffff'); t.setAttribute('stroke-width', s_(5)); t.setAttribute('stroke-linejoin','round'); }
+function svgTextFix(parent, x, y, parts, attrs){
+  const t = el('text', Object.assign({x:x, y:y}, attrs), parent);
+  let afterSub = false;
+  parts.forEach(p => {
+    if(typeof p === 'string'){ const sp = el('tspan', afterSub ? {dy:String(-s_(4))} : {}, t); sp.textContent = p; afterSub = false; }
+    else { const sp = el('tspan', {'font-size':'72%', dy:String(s_(4))}, t); sp.textContent = p.sub; afterSub = true; }
+  });
+  return t;
+}
+
+function renderCurve(){
+  if(!gDyn) return;
+  gDyn.innerHTML = '';
+  const idx = Core.stageIdx(S.stage), it = S.it;
+  const curX = view.curX != null ? view.curX : S.x;
+  const n = S.chain.length;
+
+  // rastro de estados visitados (excluye el estado actual)
+  for(let i = Math.max(0, n-1-60); i < n-1; i++){
+    const c = S.chain[i];
+    el('circle', {cx:sx(c.x), cy:sy(target(c.x)), r:s_(4.5), fill:'#8ea3c2', opacity:'.55'}, gDyn);
+  }
+
+  const showCand = it && ((idx >= 1 && idx <= 5) || (idx === 6 && view.anim));
+  let dirSign = 1;                                   // +1 si el candidato queda a la derecha de x_t
+  if(showCand){
+    const co = (idx === 6) ? view.candOpacity : 1;
+    const g = el('g', {opacity:co}, gDyn);
+    const x0 = it.x, y1 = it.y;
+    const yc = Math.min(CFG.xMax, Math.max(CFG.xMin, y1));         // si cae fuera del gráfico, se ancla al borde
+    const out = (yc !== y1);
+    const p0 = {x:sx(x0), y:sy(target(x0))}, p1 = {x:sx(yc), y:sy(target(yc))};
+    const dx = p1.x - p0.x, dy = p1.y - p0.y;
+    dirSign = dx >= 0 ? 1 : -1;
+    // niveles de densidad (a partir de "Comparar")
+    if(idx >= 2){
+      const hi = it.px >= it.py;
+      const lv = (p, col, parts, above) => {
+        el('line', {x1:G.L, y1:p.y, x2:p.x, y2:p.y, stroke:col, 'stroke-width':s_(2), 'stroke-dasharray':`${s_(7)} ${s_(6)}`, opacity:'.85'}, g);
+        const t = svgTextFix(g, G.L+s_(8), above ? p.y-s_(7) : p.y+s_(19), parts, {'font-size':s_(16), 'font-weight':'700', fill:col}); halo(t);
+      };
+      lv(p0, '#1f5fa8', ['π(x', {sub:'t'}, ') = ' + fmtDen(it.px)], hi);
+      lv(p1, '#d9701a', ['π(y) = ' + fmtDen(it.py)], !hi);
+    }
+    // guía vertical del candidato + valor en el eje
+    el('line', {x1:p1.x, y1:p1.y, x2:p1.x, y2:axisY(), stroke:'#d9701a', 'stroke-width':s_(2), 'stroke-dasharray':`${s_(5)} ${s_(5)}`}, g);
+    const yv = svgTextFix(g, p1.x + dirSign*s_(7), axisY()-s_(8), [out ? 'y = ' + fmtX(y1) + ' (fuera)' : 'y = ' + fmtX(y1)], {'text-anchor': dirSign>0 ? 'start':'end', 'font-size':s_(16), 'font-weight':'700', fill:'#d9701a'}); halo(yv);
+    const dl = svgTextFix(g, G.L + s_(70), G.T - s_(12), ['Δ = y − x', {sub:'t'}, ' = ' + fmtSigned(it.delta)], {'text-anchor':'start', 'font-size':s_(17), 'font-weight':'700', fill:'#d9701a'});
+    // flecha x_t → y (arco)
+    const cxp = (p0.x + p1.x)/2, cyp = Math.min(p0.y, p1.y) - Math.max(s_(44), Math.abs(dx)*0.32);
+    const unit = (a, b) => { const l = Math.hypot(b.x-a.x, b.y-a.y) || 1; return {x:(b.x-a.x)/l, y:(b.y-a.y)/l}; };
+    const c = {x:cxp, y:Math.max(s_(18), cyp)};
+    const u0 = unit(p0, c), u1 = unit(p1, c);
+    const s0 = {x:p0.x + u0.x*s_(13), y:p0.y + u0.y*s_(13)}, e1 = {x:p1.x + u1.x*s_(17), y:p1.y + u1.y*s_(17)};
+    if(Math.abs(dx) > 3 || Math.abs(dy) > 3){
+      el('path', {d:`M${s0.x.toFixed(1)} ${s0.y.toFixed(1)} Q${c.x.toFixed(1)} ${c.y.toFixed(1)} ${e1.x.toFixed(1)} ${e1.y.toFixed(1)}`, fill:'none', stroke:'#d9701a', 'stroke-width':s_(3.2), 'stroke-dasharray':`${s_(9)} ${s_(6)}`, 'marker-end':'url(#arrCand)'}, g);
+    }
+    // candidato
+    const decided = idx >= 5;
+    const ring = decided ? (it.accepted ? '#2a8a3e' : '#c0392b') : '#ffffff';
+    el('circle', {cx:p1.x, cy:p1.y, r:s_(decided ? 14 : 11), fill:decided ? 'none' : '#d9701a', stroke:ring, 'stroke-width':s_(4)}, g);
+    el('circle', {cx:p1.x, cy:p1.y, r:s_(9), fill:'#d9701a', stroke:'#fff', 'stroke-width':s_(2)}, g);
+    const yl = svgTextFix(g, p1.x + dirSign*s_(16), p1.y - s_(14), ['y'], {'text-anchor': dirSign>0 ? 'start':'end', 'font-size':s_(21), 'font-style':'italic', 'font-weight':'700', fill:'#d9701a'}); halo(yl);
+    if(decided){
+      const mark = el('text', {x:p1.x + dirSign*s_(30), y:p1.y + s_(11), 'text-anchor':'middle', 'font-size':s_(30), 'font-weight':'700', fill: it.accepted ? '#2a8a3e' : '#c0392b'}, g);
+      mark.textContent = it.accepted ? '✓' : '✕'; halo(mark);
+    }
+  }
+
+  // estado actual
+  const cy = sy(target(curX)), cxp = sx(curX);
+  el('line', {x1:cxp, y1:cy, x2:cxp, y2:axisY(), stroke:'#1f5fa8', 'stroke-width':s_(2), 'stroke-dasharray':`${s_(5)} ${s_(5)}`}, gDyn);
+  const r = s_(11) + view.pulse * s_(6);
+  el('circle', {cx:cxp, cy:cy, r:r, fill:'#1f5fa8', stroke:'#fff', 'stroke-width':s_(3)}, gDyn);
+  const outward = -dirSign;
+  const lab = svgTextFix(gDyn, cxp + outward*s_(16), cy - s_(14), ['x', {sub:'t'}], {'text-anchor': outward>0 ? 'start':'end', 'font-size':s_(21), 'font-style':'italic', 'font-weight':'700', fill:'#1f5fa8'}); halo(lab);
+  const xv = svgTextFix(gDyn, cxp + outward*s_(7), axisY()-s_(8), ['x', {sub:'t'}, ' = ' + fmtX(curX)], {'text-anchor': outward>0 ? 'start':'end', 'font-size':s_(16), 'font-weight':'700', fill:'#1f5fa8'}); halo(xv);
+
+  // cartel de decisión
+  if(it && idx >= 5){
+    const ok = it.accepted, w = s_(250), h = s_((ok && it.lower) ? 62 : 40);
+    const bx = G.W - G.R - w, by = Math.max(2, G.T - s_(8));
+    el('rect', {x:bx, y:by, width:w, height:h, rx:s_(10), fill: ok ? '#e4f4e8' : '#fbe7e4', stroke: ok ? '#2a8a3e' : '#c0392b', 'stroke-width':s_(3)}, gDyn);
+    const t1 = el('text', {x:bx + w/2, y:by + s_(28), 'text-anchor':'middle', 'font-size':s_(23), 'font-weight':'700', fill: ok ? '#2a8a3e' : '#c0392b'}, gDyn);
+    t1.textContent = ok ? '✓ ACEPTADO' : '✕ RECHAZADO';
+    if(ok && it.lower){ const t2 = el('text', {x:bx + w/2, y:by + s_(51), 'text-anchor':'middle', 'font-size':s_(16), fill:'#2a6a38'}, gDyn); t2.textContent = 'aunque es menos plausible'; }
+  }
+}
+
+// ---- histograma ----
+let BINW = 0.5, NB = Math.round((CFG.xMax - CFG.xMin)/BINW);
+function setBins(){ NB = 34; BINW = (CFG.xMax - CFG.xMin)/NB; }
+function renderHist(){
+  histSvg.innerHTML = '';
+  const hx = x => Hh.L + (x - CFG.xMin)/(CFG.xMax - CFG.xMin) * Hh.pw;
+  const counts = new Array(NB).fill(0);
+  S.chain.forEach(c => { const b = Math.floor((c.x - CFG.xMin)/BINW); if(b >= 0 && b < NB) counts[b]++; });
+  const n = S.chain.length;
+  const dens = counts.map(c => c/(n*BINW));
+  let tmax = 0; for(let i=0;i<=300;i++){ tmax = Math.max(tmax, target(CFG.xMin + i/300*(CFG.xMax-CFG.xMin))/normZ); }
+  const dmax = Math.max(tmax, ...dens) * 1.12;
+  const hy = d => Hh.T + Hh.ph - d/dmax*Hh.ph;
+  el('line', {x1:Hh.L, y1:Hh.T+Hh.ph, x2:Hh.W-Hh.R, y2:Hh.T+Hh.ph, stroke:'#2b3a55', 'stroke-width':s_(1.8)}, histSvg);
+  dens.forEach((d,i) => { if(d > 0){ el('rect', {x:hx(CFG.xMin + i*BINW)+1, y:hy(d), width:Math.max(1, Hh.pw/NB-2), height:Hh.T+Hh.ph-hy(d), fill:'#7fa6d8', stroke:'#fff', 'stroke-width':'1'}, histSvg); } });
+  let d = ''; for(let i=0;i<=300;i++){ const x = CFG.xMin + i/300*(CFG.xMax-CFG.xMin); d += (i?'L':'M') + hx(x).toFixed(1) + ' ' + hy(target(x)/normZ).toFixed(1); }
+  el('path', {d:d, fill:'none', stroke:'#2b3a55', 'stroke-width':s_(2.2), 'stroke-dasharray':`${s_(7)} ${s_(4)}`}, histSvg);
+  ticks().forEach(x => { const t = el('text', {x:hx(x), y:Hh.T+Hh.ph+s_(20), 'text-anchor':'middle', 'font-size':s_(14), fill:'#566074'}, histSvg); t.textContent = fmtTick(x); });
+  const lg = el('text', {x:Hh.W-Hh.R-6, y:Hh.T+s_(14), 'text-anchor':'end', 'font-size':s_(13), fill:'#566074'}, histSvg); lg.textContent = '- - - curva objetivo (referencia)';
+  $('histCount').textContent = 'n = ' + n;
+}
+
+// ---- panel de paso ----
+const CHIPS = ['Proponer','Comparar','Calcular α','Generar u','Aceptar / rechazar','Actualizar'];
+const ROWS = [
+  {k:'x',   lab:'Estado actual <i>x</i><sub>t</sub>'},
+  {k:'y',   lab:'Candidato propuesto <i>y</i>'},
+  {k:'px',  lab:'Densidad actual π(<i>x</i><sub>t</sub>)'},
+  {k:'py',  lab:'Densidad candidata π(<i>y</i>)'},
+  {k:'a',   lab:'Probabilidad de aceptación α'},
+  {k:'u',   lab:'Número aleatorio <i>u</i>'},
+  {k:'dec', lab:'Decisión'},
+  {k:'new', lab:'Nuevo estado <i>x</i><sub>t+1</sub>'}
+];
+function buildPanel(){
+  $('stepper').innerHTML = CHIPS.map((c,i) => `<span class="chip" data-i="${i}">${i+1}. ${c}</span>`).join('');
+  $('fields').innerHTML = ROWS.map(r => `<div class="row"><span class="lab">${r.lab}</span><span class="val off" id="v_${r.k}">—</span></div>`).join('')
+                        + '<div class="formula" id="formulaA"></div>';
+}
+function setVal(k, html, cls){ const e = $('v_'+k); e.className = 'val' + (cls ? ' '+cls : ''); e.innerHTML = html; }
+function offVal(k){ const e = $('v_'+k); e.className = 'val off'; e.textContent = '—'; }
+
+function renderPanel(){
+  const idx = Core.stageIdx(S.stage), it = S.it;
+  document.querySelectorAll('.chip').forEach(ch => {
+    const i = +ch.dataset.i; ch.className = 'chip' + (idx - 1 === i ? ' active' : (idx - 1 > i ? ' done' : ''));
+  });
+  $('iterLabel').textContent = idx === 0 ? 'estado inicial' : (idx === 6 ? 'iteración completada' : 'iteración ' + (S.t + 1));
+  setVal('x', fmtX(idx === 6 ? it.x : S.x), 'c-cur');
+  ROWS.slice(1).forEach(r => offVal(r.k));
+  $('formulaA').innerHTML = '';
+  if(it && idx >= 1){ setVal('y', fmtX(it.y) + `<small>Δ = ${fmtSigned(it.delta)} · σ = ${it.sigma.toFixed(2)}</small>`, 'c-cand'); }
+  if(it && idx >= 2){
+    setVal('px', fmtDen(it.px) + (it.px > it.py ? ' ▲' : ''), 'c-cur');
+    setVal('py', fmtDen(it.py) + (it.py > it.px ? ' ▲' : ''), 'c-cand');
+  }
+  if(it && idx >= 3){
+    let aTxt = fmtAlpha(it.alpha);
+    if(idx >= 4){ const p = fmtUA(it.u, it.alpha); aTxt = (it.alpha === 1 ? '1' : p[1]); setVal('u', p[0]); }
+    setVal('a', aTxt);
+    $('formulaA').innerHTML = `α = min{1, ${fmtDen(it.py)} / ${fmtDen(it.px)}} = ${aTxt}`;
+  }
+  if(it && idx >= 5){
+    const rel = it.accepted ? 'u ≤ α' : 'u &gt; α';
+    setVal('dec', (it.accepted ? '✓ Aceptado' : '✕ Rechazado') + `<small>${rel} → <i>x</i><sub>t+1</sub> = ${it.accepted ? '<i>y</i>' : '<i>x</i><sub>t</sub>'}</small>`, it.accepted ? 'c-ok' : 'c-bad');
+  }
+  if(it && idx >= 6){ setVal('new', fmtX(it.xNew), it.accepted ? 'c-cand' : 'c-cur'); }
+  // barra de u
+  $('ubar').classList.toggle('hidden', !(it && idx >= 3));
+  const af = $('afill'), al = $('alab'), um = $('umark'), ul = $('ulab');
+  if(it && idx >= 3){
+    af.style.width = (it.alpha*100).toFixed(2) + '%';
+    al.style.display = 'block'; al.style.left = (it.alpha*100).toFixed(2) + '%'; al.style.transform = it.alpha > 0.82 ? 'translateX(-100%)' : (it.alpha < 0.12 ? 'translateX(0)' : 'translateX(-50%)'); al.textContent = 'α = ' + fmtAlpha(it.alpha);
+  } else { af.style.width = '0'; al.style.display = 'none'; }
+  if(it && idx >= 4){
+    um.style.display = 'block'; ul.style.display = 'block';
+    um.style.left = (it.u*100).toFixed(2) + '%'; ul.style.left = (it.u*100).toFixed(2) + '%'; ul.style.transform = it.u > 0.8 ? 'translateX(-100%)' : (it.u < 0.12 ? 'translateX(0)' : 'translateX(-50%)');
+    ul.textContent = 'u = ' + fmtUA(it.u, it.alpha)[0];
+    const col = idx >= 5 ? (it.accepted ? '#2a8a3e' : '#c0392b') : '#1b2333';
+    um.style.borderLeftColor = col; ul.style.color = col;
+  } else { um.style.display = 'none'; ul.style.display = 'none'; }
+}
+
+// ---- explicación ----
+function renderExplain(){
+  const idx = Core.stageIdx(S.stage), it = S.it; let a = '', b = '';
+  if(idx === 0){ a = `Este es el estado actual <i>x</i><sub>t</sub> = ${fmtX(S.x)}. La cadena comienza aquí.`; b = 'Pulse «Siguiente paso» para generar un candidato.'; }
+  else if(idx === 1){ a = 'Se genera un candidato a partir del estado actual.'; b = `y = <i>x</i><sub>t</sub> + ε, con ε ~ N(0, σ²) y σ = ${it.sigma.toFixed(2)}. Desplazamiento Δ = ${fmtSigned(it.delta)}.`; }
+  else if(idx === 2){ a = 'Se compara la densidad del candidato con la del estado actual.'; b = it.lower ? 'Menor densidad → aceptación posible.' : 'Mayor densidad → aceptación segura.'; }
+  else if(idx === 3){
+    a = it.lower ? 'La propuesta tiene menor densidad, pero todavía puede aceptarse.' : 'La propuesta tiene mayor densidad: la aceptación es segura (α = 1).';
+    b = `α = min{1, π(y)/π(<i>x</i><sub>t</sub>)} = ${fmtAlpha(it.alpha)}. La constante de normalización no interviene: se cancela en el cociente.`; }
+  else if(idx === 4){ a = 'Se genera un número aleatorio u ~ U(0,1) y se compara con α.'; const p = fmtUA(it.u, it.alpha); b = `u = ${p[0]}; α = ${p[1]}. ¿Se cumple u ≤ α?`; }
+  else if(idx === 5){
+    if(it.accepted){ a = it.lower ? 'Aceptado aunque es menos plausible. La propuesta se convierte en el nuevo estado de la cadena.' : 'La propuesta fue aceptada y se convierte en el nuevo estado de la cadena.'; b = 'u ≤ α → <i>x</i><sub>t+1</sub> = y.'; }
+    else { a = 'Rechazado: permanece en el estado actual. La cadena no pierde su estado.'; b = 'u &gt; α → <i>x</i><sub>t+1</sub> = <i>x</i><sub>t</sub>. El valor se repite en la cadena.'; }
+  }
+  else { a = it.accepted ? `Se actualiza la cadena: <i>x</i><sub>t+1</sub> = ${fmtX(it.xNew)} (el candidato).` : `Se actualiza la cadena: <i>x</i><sub>t+1</sub> = ${fmtX(it.xNew)} (se repite el estado actual).`; b = 'Y repetimos el proceso para construir la cadena.'; }
+  $('explainText').innerHTML = a; $('explainSub').innerHTML = b;
+}
+
+// ---- cadena y contadores ----
+function renderChain(){
+  $('cT').textContent = 't = ' + S.t;
+  $('cAcc').textContent = S.acc; $('cRej').textContent = S.rej;
+  $('cRate').textContent = S.t > 0 ? (100*S.acc/S.t).toFixed(1) + ' %' : '—';
+  const n = S.chain.length, from = Math.max(0, n - 5);
+  const parts = [];
+  for(let i = from; i < n; i++){
+    const c = S.chain[i], last = (i === n-1);
+    parts.push(`<span class="${c.accepted === false ? 'rej' : ''} ${last ? 'cur' : ''}"><i>x</i>${subNum(i)} = ${fmtX(c.x)}${c.accepted === false ? ' ↺' : ''}</span>`);
+  }
+  $('chainText').innerHTML = '<b>Cadena:</b> ' + (from > 0 ? '… → ' : '') + parts.join(' → ') + (S.chain.some(c => c.accepted === false) ? ' <span style="color:var(--muted);font-size:.78em">(↺ rechazo: se repite)</span>' : '');
+}
+
+const NEXT_LABEL = {READY:'proponer candidato', UPDATED:'proponer candidato', PROPOSED:'comparar densidades', COMPARED:'calcular α', ALPHA:'generar u', U:'aceptar o rechazar', DECIDED:'actualizar el estado'};
+function renderButtons(){
+  const lock = busy || running;
+  $('btnNext').innerHTML = 'Siguiente paso ▶<small>→ ' + NEXT_LABEL[S.stage] + '</small>';
+  $('btnNext').disabled = lock; $('btnComplete').disabled = lock; $('btnRun').disabled = lock;
+  $('btnPause').disabled = !running;
+}
+function renderAll(){ renderCurve(); renderHist(); renderPanel(); renderExplain(); renderChain(); renderButtons(); }
+
+// ---- animaciones ----
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const frame = () => new Promise(r => requestAnimationFrame(() => r()));
+const ease = t => t < .5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2)/2;
+async function animateUpdate(ms){
+  const my = ++animId, it = S.it, from = it.x, to = S.x;
+  view.anim = true;
+  const t0 = performance.now();
+  while(true){
+    if(my !== animId) return false;
+    const k = Math.min(1, (performance.now() - t0)/Math.max(1, ms)), e = ease(k);
+    view.curX = it.accepted ? from + (to - from)*e : null;
+    view.candOpacity = 1 - e;
+    view.pulse = it.accepted ? 0 : Math.sin(Math.PI*k);
+    renderCurve();
+    if(k >= 1) break;
+    await frame();
+  }
+  view.curX = null; view.candOpacity = 1; view.pulse = 0; view.anim = false;
+  renderCurve();
+  return true;
+}
+
+// ---- acciones ----
+async function stepOnce(animMs){
+  const next = Core.advance(S);
+  if(next === 'UPDATED'){
+    renderPanel(); renderExplain(); renderChain(); renderHist();
+    await animateUpdate(animMs == null ? 480 : animMs);
+  } else { renderAll(); }
+  return next;
+}
+async function onNext(){
+  if(busy || running) return;
+  busy = true; renderButtons();
+  await stepOnce();
+  busy = false; renderAll();
+}
+async function onComplete(){
+  if(busy || running) return;
+  busy = true; renderButtons();
+  const my = runId;
+  if(S.stage === 'UPDATED' || S.stage === 'READY'){ Core.advance(S); }
+  while(S.stage !== 'UPDATED' && my === runId){
+    if(S.stage === 'DECIDED'){ await stepOnce(320); break; }
+    Core.advance(S);
+  }
+  busy = false; renderAll();
+}
+const SPEED = { slow:{d:650, anim:620}, normal:{d:260, anim:420}, fast:{d:60, anim:180}, instant:{d:0, anim:0} };
+async function onRun(){
+  if(busy || running) return;
+  const n = parseInt($('selSteps').value, 10) || 50;
+  const sp = SPEED[$('selSpeed').value] || SPEED.normal;
+  const my = ++runId; running = true; renderButtons();
+  let done = 0;
+  try{
+    if(sp.d === 0){
+      while(done < n && my === runId){
+        const batch = Math.min(6, n - done);
+        for(let i=0;i<batch;i++){
+          if(S.stage === 'UPDATED' || S.stage === 'READY') Core.advance(S);
+          while(S.stage !== 'UPDATED') Core.advance(S);
+          done++;
+        }
+        view.curX = null; view.candOpacity = 1; view.pulse = 0; view.anim = false;
+        renderAll(); await frame(); await sleep(15);
+      }
+    } else {
+      while(done < n && my === runId){
+        const next = await stepOnce(sp.anim);
+        if(my !== runId) break;
+        if(next === 'UPDATED') done++;
+        await sleep(sp.d);
+      }
+    }
+  } finally {
+    if(my === runId){ running = false; }
+    renderAll();
+  }
+}
+function onPause(){ runId++; running = false; renderButtons(); }
+
+function readSeed(){ const v = parseInt($('inSeed').value, 10); return Number.isFinite(v) ? v : 1; }
+function readX0(){ let v = parseFloat($('inX0').value); if(!Number.isFinite(v)) v = CFG.x0Def; return Math.min(CFG.x0Max, Math.max(CFG.x0Min, v)); }
+function resetSim(){
+  runId++; animId++; running = false; busy = false;        // cancela bucles y animaciones pendientes
+  view = { curX:null, candOpacity:1, pulse:0, anim:false };
+  const x0 = readX0(); $('inX0').value = x0;
+  S = Core.newSim(readSeed(), x0, parseFloat($('rngSigma').value));
+  renderAll();
+}
+function newSimulation(){ $('inSeed').value = Math.floor(Math.random()*900000) + 100000; resetSim(); }
+function onSigma(){
+  const s = parseFloat($('rngSigma').value); $('sigmaVal').textContent = s.toFixed(CFG.sDec);
+  if(S) S.sigma = Core.clampSigma(s);        // afecta a las próximas propuestas
+}
+function setSigma(v){ $('rngSigma').value = v; onSigma(); }
+
+// ---- inicialización ----
+function applyTarget(k, keepSeed){
+  Core.setTarget(k);
+  setBins();
+  let z = 0; const N = 4000, a = CFG.xMin, b = CFG.xMax; for(let i=0;i<=N;i++){ z += target(a + i/N*(b-a)); } normZ = z*(b-a)/N;
+  const r = $('rngSigma'); r.min = CFG.sMin; r.max = CFG.sMax; r.step = CFG.sStep; r.value = CFG.sDef;
+  const x0 = $('inX0'); x0.min = CFG.x0Min; x0.max = CFG.x0Max; x0.step = CFG.x0Step; x0.value = CFG.x0Def;
+  $('pSmall').textContent = 'Pequeño ' + CFG.sSmall.toFixed(CFG.lab); $('pMid').textContent = 'Intermedio ' + CFG.sMid.toFixed(CFG.lab); $('pBig').textContent = 'Amplio ' + CFG.sBig.toFixed(CFG.lab);
+  $('hintTarget').textContent = CFG.hint;
+  $('sigmaVal').textContent = CFG.sDef.toFixed(CFG.sDec);
+  if(S){ fit(); resetSim(); }
+}
+function init(){
+  buildPanel();
+  const clk = (id, fn) => $(id).addEventListener('click', e => { fn(); e.currentTarget.blur(); });
+  clk('btnNext', onNext); clk('btnComplete', onComplete); clk('btnRun', onRun); clk('btnPause', onPause);
+  clk('btnReset', resetSim); clk('btnNew', newSimulation);
+  clk('pSmall', () => setSigma(CFG.sSmall)); clk('pMid', () => setSigma(CFG.sMid)); clk('pBig', () => setSigma(CFG.sBig));
+  $('selTarget').addEventListener('change', e => { applyTarget(e.target.value); e.target.blur(); });
+  applyTarget('mix');
+  $('rngSigma').addEventListener('input', onSigma);
+  $('inX0').addEventListener('change', () => { if(S.t === 0 && S.stage === 'READY') resetSim(); });
+  $('inSeed').addEventListener('change', () => { if(S.t === 0 && S.stage === 'READY') resetSim(); });
+  document.addEventListener('keydown', e => {
+    const tag = (e.target && e.target.tagName) || '';
+    if(tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+    if(tag === 'BUTTON' && e.key === ' ') return;
+    if(e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' '){ e.preventDefault(); onNext(); }
+  });
+  // tamaño real de los gráficos → viewBox en píxeles (texto nítido y sin deformar)
+  S = Core.newSim(readSeed(), readX0(), parseFloat($('rngSigma').value));
+  fit();
+  let raf = 0;
+  const ro = new ResizeObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => { if(fit() && S) renderAll(); }); });
+  ro.observe(curveSvg); ro.observe(histSvg);
+  resetSim();
+}
+window.__MH = { Core: Core, get S(){ return S; } };   // acceso para pruebas
+init();
+})();
+</script>
+</body>
+</html>
